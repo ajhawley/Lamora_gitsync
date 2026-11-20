@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Lumora (LumoraPlayer) - original work, noncommercial licence.
 package com.lumora
 
-import android.app.AlertDialog
+import com.lumora.ui.dialog.LumoraDialog
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
@@ -57,26 +57,24 @@ internal fun MainActivity.startXeevPairing() {
     content.addView(code, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
     content.addView(help, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
 
-    val dialog = AlertDialog.Builder(this)
+    val dialog = LumoraDialog.Builder(this)
         .setTitle(R.string.xeev_pair_title)
         .setView(content)
         .setNegativeButton(android.R.string.cancel, null)
-        .setNeutralButton(R.string.xeev_open_manager, null)
-        .setPositiveButton(R.string.xeev_copy_code, null)
-        .create()
-    dialog.setOnCancelListener { /* The polling coroutine observes isShowing. */ }
-    dialog.show()
-    dialog.getButton(AlertDialog.BUTTON_NEUTRAL).setOnClickListener {
-        runCatching { startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://xeev.app/"))) }
-    }
-    dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
-        val value = code.text.toString()
-        if (value.isNotBlank()) {
-            val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-            clipboard.setPrimaryClip(ClipData.newPlainText("XEEV app code", value))
-            Toast.makeText(this, R.string.xeev_code_copied, Toast.LENGTH_SHORT).show()
+        .setNeutralButton(R.string.xeev_open_manager) { _, _ ->
+            runCatching { startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://xeev.app/"))) }
         }
-    }
+        .setPositiveButton(R.string.xeev_copy_code) { _, _ ->
+            val value = code.text.toString()
+            if (value.isNotBlank()) {
+                val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                clipboard.setPrimaryClip(ClipData.newPlainText("XEEV app code", value))
+                Toast.makeText(this, R.string.xeev_code_copied, Toast.LENGTH_SHORT).show()
+            }
+        }
+        .setOnCancelListener { /* The polling coroutine observes isShowing. */ }
+        .create()
+    dialog.show()
 
     scope.launch {
         val registration = try {
