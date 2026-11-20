@@ -1,0 +1,113 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- One multiview pane: a live channel playing in its own TextureView, with a label and a
+     status badge. The cell root is the focus target - the whole tile is one D-pad stop, and
+     focus == "this is the audible pane" (see MainActivityMultiview). TextureView, not
+     SurfaceView: a grid of SurfaceView hardware overlays hits overlay-count limits, and
+     TextureView also lets the black-frame watchdog sample each pane with getBitmap - the
+     same reason the guide's inline preview is a TextureView. -->
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:id="@+id/mvCellRoot"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:layout_margin="2dp"
+    android:background="@drawable/bg_mv_cell"
+    android:clickable="true"
+    android:clipChildren="true"
+    android:clipToPadding="true"
+    android:focusable="true"
+    android:foreground="@drawable/bg_mv_cell_foreground">
+
+    <com.lumora.player.VideoAspectFrameLayout
+        android:id="@+id/mvCellAspect"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent">
+
+        <TextureView
+            android:id="@+id/mvCellSurface"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent" />
+    </com.lumora.player.VideoAspectFrameLayout>
+
+    <ProgressBar
+        android:id="@+id/mvCellSpinner"
+        android:layout_width="28dp"
+        android:layout_height="28dp"
+        android:layout_gravity="center"
+        android:indeterminate="true"
+        android:indeterminateTint="@color/primary"
+        android:importantForAccessibility="no"
+        android:visibility="gone" />
+
+    <TextView
+        android:id="@+id/mvCellLabel"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="bottom|start"
+        android:layout_margin="6dp"
+        android:background="@drawable/bg_player_bottom"
+        android:ellipsize="end"
+        android:importantForAccessibility="no"
+        android:maxLines="1"
+        android:maxWidth="@dimen/mv_cell_label_max_width"
+        android:paddingHorizontal="7dp"
+        android:paddingVertical="3dp"
+        android:textColor="@color/text_primary"
+        android:textSize="@dimen/mv_cell_label_text" />
+
+    <TextView
+        android:id="@+id/mvCellBadge"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="top|end"
+        android:layout_margin="6dp"
+        android:background="@drawable/bg_player_bottom"
+        android:ellipsize="end"
+        android:importantForAccessibility="no"
+        android:maxLines="1"
+        android:paddingHorizontal="6dp"
+        android:paddingVertical="2dp"
+        android:textColor="@color/primary_light"
+        android:textSize="@dimen/mv_cell_badge_text"
+        android:visibility="gone" />
+
+    <!-- Terminal pane state. Centered over the dead frame rather than a tiny corner badge:
+         this is the one state where the screen itself is the message. -->
+    <LinearLayout
+        android:id="@+id/mvCellError"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:background="@color/overlay"
+        android:gravity="center"
+        android:importantForAccessibility="noHideDescendants"
+        android:orientation="vertical"
+        android:padding="16dp"
+        android:visibility="gone">
+
+        <ImageView
+            android:layout_width="@dimen/mv_cell_error_icon"
+            android:layout_height="@dimen/mv_cell_error_icon"
+            android:importantForAccessibility="no"
+            android:src="@drawable/ic_signal_offline"
+            app:tint="@color/text_secondary" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:fontFamily="@font/inter_semibold"
+            android:text="@string/mv_cell_offline_title"
+            android:textColor="@color/text_primary"
+            android:textSize="@dimen/mv_cell_error_title_text" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="2dp"
+            android:gravity="center"
+            android:maxLines="2"
+            android:text="@string/mv_cell_offline_hint"
+            android:textColor="@color/text_secondary"
+            android:textSize="@dimen/mv_cell_error_hint_text" />
+    </LinearLayout>
+</FrameLayout>
