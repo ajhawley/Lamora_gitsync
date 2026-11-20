@@ -47,7 +47,7 @@ internal fun MainActivity.startXeevPairing() {
         setTypeface(typeface, Typeface.BOLD)
         gravity = Gravity.CENTER
         setPadding(0, 18, 0, 18)
-        textIsSelectable = true
+        setTextIsSelectable(true)
     }
     val help = TextView(this).apply {
         text = getString(R.string.xeev_pair_instructions)
