@@ -634,7 +634,7 @@ internal fun MainActivity.applyProviderToggle(
     // refresh them here, or xtreamProviderFor keeps answering for a provider Settings just
     // disabled and a detail page can still fetch that panel's episodes behind Play.
     IptvProviderStore.load(prefs).let { configs ->
-        xtreamProviderConfigs = configs.filter { it.enabled && it.type == "xtream" }.associateBy { it.id }
+        xtreamProviderConfigs = configs.filter { it.enabled && (it.type == "xtream" || it.type == "xeev") }.associateBy { it.id }
         providerNamesById = configs.associate { it.id to it.name }
     }
     if (enabled) {
@@ -980,11 +980,25 @@ internal fun MainActivity.loadAllConfiguredProviders(
     // that belongs to someone else's stream. Drop it; the disk copy still answers the first
     // re-fetch for any channel that really is the same.
     com.lumora.cache.EpgListCache.clear()
-    xtreamProviderConfigs = IptvProviderStore.load(prefs).filter { it.enabled && it.type == "xtream" }.associateBy { it.id }
+    // The first XEEV integration deliberately created providers with Movies/Series off
+    // because those importers were not implemented yet. Upgrade those existing paired
+    // entries once; after this migration, the user's per-section toggles are respected.
+    if (!prefs.getBoolean("xeev_vod_sections_migrated", false)) {
+        IptvProviderStore.load(prefs).filter { it.type == "xeev" }.forEach { xeev ->
+            if (!xeev.moviesEnabled || !xeev.seriesEnabled) {
+                IptvProviderStore.upsert(prefs, xeev.copy(moviesEnabled = true, seriesEnabled = true))
+            }
+        }
+        prefs.edit().putBoolean("xeev_vod_sections_migrated", true).apply()
+    }
+    val configuredProviders = IptvProviderStore.load(prefs)
+    xtreamProviderConfigs = configuredProviders.filter {
+        it.enabled && (it.type == "xtream" || it.type == "xeev")
+    }.associateBy { it.id }
     // Every type, not just Xtream, and regardless of enabled state - a cached catalog can
     // still contain items from a provider that's since been switched off, and their chips
     // should still say where they came from.
-    providerNamesById = IptvProviderStore.load(prefs).associate { it.id to it.name }
+    providerNamesById = configuredProviders.associate { it.id to it.name }
     // Small playlists are ingested straight into the resident model; the database write and
     // its fifteen indexes are skipped entirely. The decision uses the sizes measured by the
     // previous load, so the first load of a new setup still goes through Room (there is no
@@ -1387,7 +1401,7 @@ internal fun MainActivity.loadAllConfiguredProviders(
                         "stalker" -> fetchStalkerChannels(
                             config, publishLive, fetchVod = !(keepMovie && keepSeries)
                         )
-                        "xeev" -> fetchXeevChannels(config)
+                        "xeev" -> fetchXeevChannels(config, loadMovies = !keepMovie, loadSeries = !keepSeries)
                         else -> fetchM3uChannels(config, onProgress) { live ->
                             loadScope.launch { showPartial(config.id, live) }
                         }

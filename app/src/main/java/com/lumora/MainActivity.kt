@@ -714,9 +714,9 @@ class MainActivity : AppCompatActivity() {
     // from the persisted dead marks so one hiccup never hides a version for an hour.
     internal val failedVersionKeys = mutableSetOf<String>()
 
-    // Every configured Xtream provider, keyed by IptvProviderConfig.id - detail/EPG calls
-    // resolve the right one per-Channel via Channel.sourceProviderId instead of assuming
-    // whichever Xtream provider loaded last (the old single `provider` field, deleted).
+    // Every configured Xtream/XEEV Player API provider, keyed by IptvProviderConfig.id -
+    // detail/EPG calls resolve the right one per-Channel via Channel.sourceProviderId instead
+    // of assuming whichever provider loaded last (the old single `provider` field, deleted).
     internal var xtreamProviderConfigs: Map<String, IptvProviderConfig> = emptyMap()
     /** IptvProviderConfig id -> display name, for showing which provider an item came from. */
     internal var providerNamesById: Map<String, String> = emptyMap()

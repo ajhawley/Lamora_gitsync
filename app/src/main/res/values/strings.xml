@@ -175,7 +175,7 @@
     <string name="xeev_registering">Requesting your XEEV app code…</string>
     <string name="xeev_pair_instructions">Open XEEV Playlist Manager, enter this app code and assign your playlist. Lumora will detect the pairing and import your live channels automatically.</string>
     <string name="xeev_waiting_pair">Waiting for you to pair in XEEV Playlist Manager…</string>
-    <string name="xeev_waiting_pair_countdown">Still waiting for pairing. Checking again soon (%1$d:%2$02d remaining).</string>
+    <string name="xeev_waiting_pair_countdown">Next pairing check in %1$d seconds</string>
     <string name="xeev_pair_check_error">Could not check pairing: %1$s. Will retry automatically.</string>
     <string name="xeev_pair_timeout">Pairing was not detected within 10 minutes. You can close this and try again.</string>
     <string name="xeev_importing">Pairing confirmed. Importing your playlist…</string>

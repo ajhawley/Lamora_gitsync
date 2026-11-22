@@ -12,10 +12,33 @@ import java.io.IOException
 class XeevClient(private val http: OkHttpClient) {
     data class Registration(val appCode: String, val qrUrl: String?)
     data class Category(val id: String, val name: String)
-    data class Playlist(val categories: List<Category>, val channels: List<XeevChannel>, val ignoredChannels: Int)
+    data class Playlist(val categories: List<Category>, val channels: List<XeevChannel>, val ignoredChannels: Int) {
+        /** Split the shared #CHAN list using the verified VOD stream_id -> record ID join.
+         * Every VOD ID must match exactly one playlist row before any remainder is called Live.
+         */
+        fun classifyByVodRecordIds(vodRecordIds: Set<String>): ClassifiedChannels {
+            if (vodRecordIds.isEmpty()) throw IOException("XEEV VOD API returned no movie IDs")
+            val rowsById = channels.groupBy { it.recordId }
+            if (rowsById.any { (id, rows) -> id.isBlank() || rows.size != 1 }) {
+                throw IOException("XEEV playlist contains blank or duplicate record IDs")
+            }
+            val movies = vodRecordIds.map { id ->
+                val matches = rowsById[id]
+                    ?: throw IOException("XEEV movie ID did not match a playlist record")
+                if (matches.size != 1) throw IOException("XEEV movie ID matched multiple playlist records")
+                matches.single()
+            }
+            return ClassifiedChannels(
+                live = channels.filterNot { it.recordId in vodRecordIds },
+                movies = movies
+            )
+        }
+    }
+    data class ClassifiedChannels(val live: List<XeevChannel>, val movies: List<XeevChannel>)
     data class XeevChannel(
         val recordId: String, val categoryId: String, val name: String,
-        val epgId: String?, val logoUrl: String?, val playbackUrl: String
+        val epgId: String?, val logoUrl: String?, val playbackUrl: String,
+        val providerStreamId: String? = null
     )
 
     @Throws(IOException::class)
@@ -72,7 +95,8 @@ class XeevClient(private val http: OkHttpClient) {
         return parsePlaylist(text)
     }
 
-    /** Only the documented #CAT and #CHAN live-TV layouts are interpreted. */
+    /** Parse the shared #CAT/#CHAN playlist. #CHAN rows are classified as Live or Movie
+     * only after joining their record IDs to the Player API VOD stream IDs. */
     fun parsePlaylist(content: String): Playlist {
         val categories = LinkedHashMap<String, Category>()
         val channels = ArrayList<XeevChannel>()
@@ -88,6 +112,7 @@ class XeevClient(private val http: OkHttpClient) {
                     if (id.isNotEmpty() && name.isNotEmpty()) categories[id] = Category(id, name)
                 }
                 "#CHAN" -> {
+                    val recordId = fields.getOrNull(1)?.trim().orEmpty()
                     val name = fields.getOrNull(3)?.trim().orEmpty()
                     val categoryId = fields.getOrNull(2)?.trim().orEmpty()
                     // Keep field 7 byte-for-byte as supplied for playback. Trim only for validation.
@@ -95,13 +120,13 @@ class XeevClient(private val http: OkHttpClient) {
                     val validUrl = playback.trim().toHttpUrlOrNull()?.let {
                         it.scheme == "http" || it.scheme == "https"
                     } == true
-                    if (fields.size < 8 || name.isEmpty() || categoryId.isEmpty() || !validUrl) {
+                    if (fields.size < 8 || recordId.isEmpty() || name.isEmpty() || categoryId.isEmpty() || !validUrl) {
                         ignored++
                     } else {
                         val primaryEpg = fields.getOrNull(4)?.trim().orEmpty()
                         val secondaryEpg = fields.getOrNull(5)?.trim().orEmpty()
                         channels += XeevChannel(
-                            recordId = fields.getOrNull(1)?.trim().orEmpty(),
+                            recordId = recordId,
                             categoryId = categoryId,
                             name = name.removeSuffix(" -").trim(),
                             epgId = primaryEpg.takeIf { it.isNotBlank() && it != "0" }
@@ -109,13 +134,14 @@ class XeevClient(private val http: OkHttpClient) {
                             logoUrl = fields.getOrNull(6)?.trim()?.takeIf { url ->
                                 url.toHttpUrlOrNull()?.let { it.scheme == "http" || it.scheme == "https" } == true
                             },
-                            playbackUrl = playback
+                            playbackUrl = playback,
+                            providerStreamId = fields.getOrNull(10)?.trim()?.takeIf { it.isNotBlank() }
                         )
                     }
                 }
             }
         }
-        if (channels.isEmpty()) throw IOException("XEEV playlist contained no supported live channels")
+        if (channels.isEmpty()) throw IOException("XEEV playlist contained no supported #CHAN records")
         return Playlist(categories.values.toList(), channels, ignored)
     }
 
@@ -131,6 +157,8 @@ class XeevClient(private val http: OkHttpClient) {
 
     companion object {
         const val BASE = "https://xeev.app"
+        /** X3M Player API host observed in the verified XEEV account tests. */
+        const val PLAYER_API_BASE = "http://x3m.li"
         const val APP_VERSION = "2.6.0"
         private const val MAX_PLAYLIST_BYTES = 80L * 1024 * 1024
         fun isValidPlaylistId(value: String): Boolean = value.matches(Regex("^[A-Za-z0-9]{32}$"))

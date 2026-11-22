@@ -25,6 +25,12 @@ private const val TAG = "XtreamClient"
 /** How much a bulk list has to advance before it reports progress again. */
 private const val PROGRESS_STEP_BYTES = 512L * 1024
 
+/** Player API URLs carry credentials (and XEEV's device ID) in their query string. */
+private fun redactApiUrl(url: String): String = url.replace(
+    Regex("(?i)([?&](?:username|password|device_id)=)[^&]*"),
+    "\$1[redacted]"
+)
+
 /**
  * The suffix to put on a live stream URL, from the panel's own
  * `user_info.allowed_output_formats`.
@@ -132,7 +138,7 @@ class XtreamClient(private val client: OkHttpClient) {
     suspend fun authenticate(provider: Provider): Result<ServerInfo> = withContext(Dispatchers.IO) {
         try {
             val url = buildApiUrl(provider, "")
-            Log.d(TAG, "Auth URL: ${url.take(80)}...")
+            Log.d(TAG, "Auth URL: ${redactApiUrl(url).take(80)}...")
             lastFetchError = null
             val json = fetchJson(url)
                 ?: return@withContext Result.failure(Exception(lastFetchError ?: "Empty response from server"))
@@ -532,7 +538,7 @@ class XtreamClient(private val client: OkHttpClient) {
             client.newCall(request).execute().use { response ->
                 if (!response.isSuccessful) {
                     lastFetchError = "Server returned HTTP ${response.code}"
-                    Log.w(TAG, "HTTP ${response.code} for $url")
+                    Log.w(TAG, "HTTP ${response.code} for ${redactApiUrl(url)}")
                     return null
                 }
                 val body = response.body ?: return null
@@ -565,11 +571,11 @@ class XtreamClient(private val client: OkHttpClient) {
             }
         } catch (e: OutOfMemoryError) {
             lastFetchError = "Playlist too large to load"
-            Log.w(TAG, "OOM streaming $url")
+            Log.w(TAG, "OOM streaming ${redactApiUrl(url)}")
             null
         } catch (e: Exception) {
             lastFetchError = e.message ?: e.javaClass.simpleName
-            Log.w(TAG, "Network error fetching $url: ${e.message}")
+            Log.w(TAG, "Network error fetching ${redactApiUrl(url)}: ${e.message}")
             null
         }
     }
@@ -610,7 +616,7 @@ class XtreamClient(private val client: OkHttpClient) {
             client.newCall(request).execute().use { response ->
                 if (!response.isSuccessful) {
                     lastFetchError = "Server returned HTTP ${response.code}"
-                    Log.w(TAG, "HTTP ${response.code} for $url")
+                    Log.w(TAG, "HTTP ${response.code} for ${redactApiUrl(url)}")
                     return emptyList()
                 }
                 val body = response.body ?: return emptyList()
@@ -625,11 +631,11 @@ class XtreamClient(private val client: OkHttpClient) {
             // Even streamed, the Channel list itself is proportional to the catalog -
             // fail this provider with a message instead of taking the process down.
             lastFetchError = "Playlist too large to load"
-            Log.w(TAG, "OOM streaming $url")
+            Log.w(TAG, "OOM streaming ${redactApiUrl(url)}")
             emptyList()
         } catch (e: Exception) {
             lastFetchError = e.message ?: e.javaClass.simpleName
-            Log.w(TAG, "Network error fetching $url: ${e.message}")
+            Log.w(TAG, "Network error fetching ${redactApiUrl(url)}: ${e.message}")
             emptyList()
         }
     }
@@ -869,7 +875,8 @@ class XtreamClient(private val client: OkHttpClient) {
         val container = obj.optString("container_extension", "mp4")
         // get_series_info episodes carry no "url" field - the stream must be built manually.
         val base = provider.serverUrl?.let { normalizeServerUrl(it) }
-        val streamUrl = "$base/series/${provider.username}/${provider.password}/$id.$container"
+        val deviceSegment = provider.deviceId?.takeIf { it.isNotBlank() }?.let { "/$it" }.orEmpty()
+        val streamUrl = "$base/series/${provider.username}/${provider.password}$deviceSegment/$id.$container"
         return Channel(
             id = id,
             name = "S${seasonKey}E${episodeNum.toString().padStart(2, '0')} · $title",
@@ -891,8 +898,10 @@ class XtreamClient(private val client: OkHttpClient) {
         val base = provider.serverUrl?.let { normalizeServerUrl(it) } ?: ""
         val user = URLEncoder.encode(provider.username.orEmpty(), "UTF-8")
         val pass = URLEncoder.encode(provider.password.orEmpty(), "UTF-8")
+        val device = provider.deviceId?.takeIf { it.isNotBlank() }
+            ?.let { "&device_id=${URLEncoder.encode(it, "UTF-8")}" }.orEmpty()
         val sep = if (params.isNotBlank()) "&$params" else ""
-        return "$base/player_api.php?username=$user&password=$pass$sep"
+        return "$base/player_api.php?username=$user&password=$pass$device$sep"
     }
 
     /** Fetch JSON from URL using OkHttp. Returns null on failure. */
@@ -909,7 +918,7 @@ class XtreamClient(private val client: OkHttpClient) {
             client.newCall(request).execute().use { response ->
                 if (!response.isSuccessful) {
                     lastFetchError = "Server returned HTTP ${response.code}"
-                    Log.w(TAG, "HTTP ${response.code} for $url")
+                    Log.w(TAG, "HTTP ${response.code} for ${redactApiUrl(url)}")
                     return@use null
                 }
                 val body = response.body?.string() ?: return@use null
@@ -939,7 +948,7 @@ class XtreamClient(private val client: OkHttpClient) {
             }
         } catch (e: Exception) {
             lastFetchError = e.message ?: e.javaClass.simpleName
-            Log.w(TAG, "Network error fetching $url: ${e.message}")
+            Log.w(TAG, "Network error fetching ${redactApiUrl(url)}: ${e.message}")
             null
         }
     }

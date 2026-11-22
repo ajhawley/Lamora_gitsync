@@ -27,9 +27,10 @@ class XeevClientTest {
         assertEquals("BBC1", parsed.channels.single().epgId)
         assertEquals(playback, parsed.channels.single().playbackUrl)
         assertEquals("https://logos.example/bbc.png", parsed.channels.single().logoUrl)
+        assertEquals("provider-123", parsed.channels.single().providerStreamId)
     }
 
-    @Test fun skipsMalformedLiveRowsAndDoesNotGuessVodRecords() {
+    @Test fun skipsMalformedChannelRowsAndIgnoresUnknownRecordTypes() {
         val text = listOf(
             "#CAT\tcat-1\tNews",
             "#CHAN\tbad\tcat-1\tMissing URL\t0\tNEWS\t\t",
@@ -37,6 +38,37 @@ class XeevClientTest {
             "#SERIES\tunknown layout"
         ).joinToString("\n")
         val failure = runCatching { client.parsePlaylist(text) }.exceptionOrNull()
-        assertTrue(failure?.message?.contains("no supported live channels") == true)
+        assertTrue(failure?.message?.contains("no supported #CHAN records") == true)
     }
+    @Test fun classifiesMoviesOnlyByUniqueVodIdJoinAndLeavesRemainderAsLive() {
+        val text = listOf(
+            "#CAT\tcat-live\tUK | TV",
+            "#CAT\tcat-movie\tMovies",
+            listOf("#CHAN", "live-1", "cat-live", "BBC One", "0", "BBC1", "", "https://stream.example/live").joinToString("\t"),
+            listOf("#CHAN", "movie-1", "cat-movie", "Film title", "0", "", "", "https://stream.example/movie").joinToString("\t")
+        ).joinToString("\n")
+        val parsed = client.parsePlaylist(text)
+        val split = parsed.classifyByVodRecordIds(setOf("movie-1"))
+
+        assertEquals(listOf("live-1"), split.live.map { it.recordId })
+        assertEquals(listOf("movie-1"), split.movies.map { it.recordId })
+    }
+
+    @Test fun refusesIncompleteOrAmbiguousVodIdJoin() {
+        val uniqueText = listOf(
+            "#CAT\tcat\tCategory",
+            listOf("#CHAN", "record-1", "cat", "One", "0", "", "", "https://stream.example/1").joinToString("\t")
+        ).joinToString("\n")
+        val unique = client.parsePlaylist(uniqueText)
+        assertTrue(runCatching { unique.classifyByVodRecordIds(setOf("missing")) }.isFailure)
+
+        val duplicateText = listOf(
+            "#CAT\tcat\tCategory",
+            listOf("#CHAN", "duplicate", "cat", "One", "0", "", "", "https://stream.example/1").joinToString("\t"),
+            listOf("#CHAN", "duplicate", "cat", "Two", "0", "", "", "https://stream.example/2").joinToString("\t")
+        ).joinToString("\n")
+        val duplicate = client.parsePlaylist(duplicateText)
+        assertTrue(runCatching { duplicate.classifyByVodRecordIds(setOf("duplicate")) }.isFailure)
+    }
+
 }

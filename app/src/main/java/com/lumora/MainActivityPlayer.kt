@@ -27,6 +27,7 @@ import com.lumora.model.MediaType
 import com.lumora.model.Provider
 import com.lumora.model.ProviderType
 import com.lumora.model.IptvProviderConfig
+import com.lumora.parser.XeevClient
 import com.lumora.data.IptvProviderStore
 import com.lumora.plugin.ResolveResult
 import com.lumora.torrent.TorrentEngine
@@ -1256,11 +1257,25 @@ internal suspend fun MainActivity.resolveStalkerPlayUrl(channel: Channel): Strin
     }
 }
 
-/** The Xtream provider a Channel actually came from, for detail/EPG calls that need to
- *  hit the matching server/credentials - not whichever Xtream provider loaded last into
- *  the legacy single `provider` field. Null for non-Xtream items. */
+/** The Xtream or XEEV Player API provider a Channel actually came from, for detail/EPG
+ *  calls that need the matching server/credentials - not whichever provider loaded last.
+ *  Null for sources without a verified Player API mapping. */
 internal fun MainActivity.xtreamProviderFor(channel: Channel): Provider? {
     val config = channel.sourceProviderId?.let { xtreamProviderConfigs[it] } ?: return null
+    if (config.type == "xeev") {
+        // XEEV Live playlist IDs do not map safely to Player API live stream IDs;
+        // only Movies and Series have verified Player API joins/detail calls.
+        if (channel.mediaType == MediaType.LIVE) return null
+        val lineId = config.url?.trim()?.takeIf { XeevClient.isValidPlaylistId(it) } ?: return null
+        val deviceId = prefs.getString(PREF_XEEV_DEVICE_ID, null)?.takeIf { it.isNotBlank() } ?: return null
+        return Provider(
+            name = config.name, type = ProviderType.XTREAM,
+            serverUrl = XeevClient.PLAYER_API_BASE,
+            username = lineId.substring(0, 16),
+            password = lineId.substring(16, 32),
+            deviceId = deviceId
+        )
+    }
     return Provider(
         name = config.name, type = ProviderType.XTREAM,
         serverUrl = config.url?.let { normalizeServerUrl(it) },

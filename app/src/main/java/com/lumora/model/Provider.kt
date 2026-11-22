@@ -12,5 +12,7 @@ data class Provider(
     val username: String? = null,
     val password: String? = null,
     val m3uUrl: String? = null,
-    val userAgent: String? = null
+    val userAgent: String? = null,
+    /** Optional panel device identity required by some XEEV/X3M Player API endpoints. */
+    val deviceId: String? = null
 )
