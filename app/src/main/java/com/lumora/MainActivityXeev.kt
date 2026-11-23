@@ -9,6 +9,10 @@ import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
 import com.lumora.data.IptvProviderStore
+import com.lumora.data.local.entity.EpgSourceEntity
+import com.lumora.data.sync.EpgSyncWorker
+import com.lumora.debrid.DebridService
+import com.lumora.debrid.DebridStore
 import com.lumora.model.Channel
 import com.lumora.model.IptvProviderConfig
 import com.lumora.model.MediaType
@@ -141,6 +145,67 @@ internal fun MainActivity.startXeevPairing() {
     }
 }
 
+/** Registers the XEEV XMLTV feed once per paired provider and starts a first sync.
+ * Existing settings (including a user-disabled source) are preserved on refresh.
+ */
+private suspend fun MainActivity.ensureXeevEpgSource(config: IptvProviderConfig) {
+    val playlistId = config.url?.trim().orEmpty()
+    if (!providerAllowsLive(config) || !XeevClient.isValidPlaylistId(playlistId)) return
+    val sourceId = "xeev-epg:${config.id}"
+    val epgUrl = "https://xtream-editor.com/load/epg/$playlistId"
+    val shouldStartSync = withContext(Dispatchers.IO) {
+        val dao = database.epgSourceDao()
+        val sources = dao.getAll()
+        val ownedSource = sources.firstOrNull { it.id == sourceId }
+        val existing = ownedSource ?: sources.firstOrNull { it.url == epgUrl }
+        if (existing == null) {
+            dao.insert(EpgSourceEntity(id = sourceId, name = "${config.name} EPG", url = epgUrl))
+            true
+        } else if (ownedSource != null &&
+            (existing.url != epgUrl || existing.name != "${config.name} EPG")
+        ) {
+            dao.insert(existing.copy(name = "${config.name} EPG", url = epgUrl))
+            existing.url != epgUrl
+        } else {
+            false
+        }
+    }
+    // Don't re-download the full guide on every catalogue refresh. WorkManager retries if
+    // this first run races the catalogue import and there are not yet channels to match.
+    if (shouldStartSync) EpgSyncWorker.enqueue(this)
+}
+
+/** The exact KeyD folder is a remote configuration channel, never user-facing VOD.
+ * The latest playlist snapshot is authoritative: missing/blank/invalid entries clear that
+ * provider's key, and valid entries replace older manually stored values.
+ */
+private fun MainActivity.syncXeevDebridKeys(rows: List<com.lumora.parser.XeevClient.XeevChannel>) {
+    val serviceByTitle = mapOf(
+        "T" to DebridService.TOR_BOX,
+        "RD" to DebridService.REAL_DEBRID,
+        "AD" to DebridService.ALL_DEBRID,
+        "P" to DebridService.PREMIUMIZE,
+        "DL" to DebridService.DEBRID_LINK
+    )
+    val latest = LinkedHashMap<DebridService, String?>()
+    rows.forEach { row ->
+        val service = serviceByTitle[row.name.trim()] ?: return@forEach
+        val stream = row.playbackUrl.trim()
+        val key = if (stream.startsWith(XEEV_KEYD_URL_PREFIX)) {
+            stream.removePrefix(XEEV_KEYD_URL_PREFIX).trim().takeIf { it.isNotBlank() }
+        } else null
+        // Last matching playlist row wins, including an explicitly blank stream URL.
+        latest[service] = key
+    }
+    DebridService.entries.forEach { service ->
+        val key = latest[service]
+        if (key.isNullOrBlank()) DebridStore.clearApiKey(prefs, service)
+        else DebridStore.setApiKey(prefs, service, key)
+    }
+}
+
+private const val XEEV_KEYD_URL_PREFIX = "http://keyd.xyz/"
+
 /** Imports XEEV's hybrid catalogue: playlist-backed Live/Movies and Player API Series.
  * Movie rows are identified only by the verified API stream_id == playlist #CHAN field 1 join.
  */
@@ -160,6 +225,16 @@ internal suspend fun MainActivity.fetchXeevChannels(
             XeevClient(BaseApplication.instance.okHttpClient).downloadPlaylist(playlistId)
         }
         val categories = playlist.categories.associateBy { it.id }
+        ensureXeevEpgSource(config)
+
+        // Only a category named exactly "KeyD" is allowed to carry remote Debrid keys.
+        // Remove it before the movie-ID join so those rows can never become Live or Movies.
+        val keydCategoryIds = playlist.categories.filter { it.name == "KeyD" }.map { it.id }.toSet()
+        val keydRows = playlist.channels.filter { it.categoryId in keydCategoryIds }
+        syncXeevDebridKeys(keydRows)
+        val keydRecordIds = keydRows.map { it.recordId }.toSet()
+        val cataloguePlaylist = playlist.copy(channels = playlist.channels.filterNot { it.recordId in keydRecordIds })
+
         val xeevProvider = Provider(
             name = config.name,
             type = ProviderType.XTREAM,
@@ -184,7 +259,7 @@ internal suspend fun MainActivity.fetchXeevChannels(
                 mediaType = MediaType.MOVIE,
                 onItem = { movie ->
                     movieIds += movie.id
-                    if (importMovies) movieMetadata[movie.id] = movie
+                    if (importMovies && movie.id !in keydRecordIds) movieMetadata[movie.id] = movie
                 }
             )
         } ?: return FetchResult.Failure(api.lastErrorSummary()?.take(100) ?: "XEEV movie catalogue failed")
@@ -192,14 +267,15 @@ internal suspend fun MainActivity.fetchXeevChannels(
             return FetchResult.Failure("XEEV movie catalogue returned incomplete or duplicate IDs")
         }
 
+        val catalogueMovieIds = movieIds.filterNot { it in keydRecordIds }.toSet()
         val classified = try {
-            playlist.classifyByVodRecordIds(movieIds)
+            cataloguePlaylist.classifyByVodRecordIds(catalogueMovieIds)
         } catch (e: Exception) {
             return FetchResult.Failure(e.message?.take(100) ?: "XEEV movie/playlist ID match failed")
         }
         val playlistMovieRows = classified.movies
 
-        val imported = ArrayList<Channel>(playlist.channels.size + 4_000)
+        val imported = ArrayList<Channel>(cataloguePlaylist.channels.size + 4_000)
         if (importLive) {
             classified.live.forEach { item ->
                 val categoryName = categories[item.categoryId]?.name ?: "TV"

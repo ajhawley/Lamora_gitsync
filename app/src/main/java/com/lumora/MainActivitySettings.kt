@@ -2457,12 +2457,22 @@ internal fun MainActivity.showProviderSettings() {
                 else -> cfg.url ?: ""
             }
             if (cfg.type == "xeev") {
-                row.findViewById<View>(R.id.rowMoviesBox).visibility = View.GONE
-                row.findViewById<View>(R.id.rowSeriesBox).visibility = View.GONE
+                // XEEV now supplies all three catalogue types. Keep the same TV / Movies /
+                // Series controls as Xtream; only the credential-edit action is unavailable.
                 row.findViewById<View>(R.id.rowEditButton).visibility = View.GONE
-                row.findViewById<View>(R.id.rowRoot).nextFocusRightId = R.id.rowTvBox
-                row.findViewById<View>(R.id.rowTvBox).nextFocusRightId = R.id.rowRemoveButton
-                row.findViewById<View>(R.id.rowRemoveButton).nextFocusLeftId = R.id.rowTvBox
+                val rootRow = row.findViewById<View>(R.id.rowRoot)
+                val tvBox = row.findViewById<View>(R.id.rowTvBox)
+                val moviesBox = row.findViewById<View>(R.id.rowMoviesBox)
+                val seriesBox = row.findViewById<View>(R.id.rowSeriesBox)
+                val removeButton = row.findViewById<View>(R.id.rowRemoveButton)
+                rootRow.nextFocusRightId = tvBox.id
+                tvBox.nextFocusLeftId = rootRow.id
+                tvBox.nextFocusRightId = moviesBox.id
+                moviesBox.nextFocusLeftId = tvBox.id
+                moviesBox.nextFocusRightId = seriesBox.id
+                seriesBox.nextFocusLeftId = moviesBox.id
+                seriesBox.nextFocusRightId = removeButton.id
+                removeButton.nextFocusLeftId = seriesBox.id
             }
             // Backup sources stay enabled (they still serve failover streams), so the
             // row needs its own mark - otherwise a hidden-but-on provider reads exactly

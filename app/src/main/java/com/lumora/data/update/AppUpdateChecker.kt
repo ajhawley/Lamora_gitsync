@@ -17,6 +17,13 @@ class AppUpdateChecker(private val context: Context) {
 
     private val TAG = "AppUpdate"
 
+    /** No update host has been chosen yet. about:blank is a deliberate sentinel, not a
+     * network URL: checkForUpdate returns before touching OkHttp while this is set.
+     * When a release home is ready, replace this value and wire its ReleaseHome below;
+     * the existing GitHub/GitLab/GitFlic implementations are intentionally retained.
+     */
+    private val UPDATE_SOURCE_URL = "about:blank"
+
     /**
      * SHA-256 of the official release signing certificate. A build signed with it is a
      * genuine Lumora build even when its version isn't in the published release list yet,
@@ -101,6 +108,20 @@ class AppUpdateChecker(private val context: Context) {
      * Check for updates by fetching the newest release from Lumora's homes.
      */
     suspend fun checkForUpdate(): UpdateInfo? {
+        if (UPDATE_SOURCE_URL == "about:blank") {
+            // Treat the empty placeholder as "no update available", not a network failure:
+            // the Settings action can still give a reassuring result without any request.
+            val currentVersion = try {
+                context.packageManager.getPackageInfo(context.packageName, 0).versionName ?: "1.0"
+            } catch (e: Exception) { "1.0" }
+            return UpdateInfo(
+                latestVersion = currentVersion,
+                currentVersion = currentVersion,
+                downloadUrl = "",
+                releaseNotes = "",
+                isUpdateAvailable = false
+            )
+        }
         return try {
             val latest = fetchLatestRelease() ?: return null
 

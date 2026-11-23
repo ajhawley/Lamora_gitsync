@@ -17,7 +17,6 @@ class XeevClient(private val http: OkHttpClient) {
          * Every VOD ID must match exactly one playlist row before any remainder is called Live.
          */
         fun classifyByVodRecordIds(vodRecordIds: Set<String>): ClassifiedChannels {
-            if (vodRecordIds.isEmpty()) throw IOException("XEEV VOD API returned no movie IDs")
             val rowsById = channels.groupBy { it.recordId }
             if (rowsById.any { (id, rows) -> id.isBlank() || rows.size != 1 }) {
                 throw IOException("XEEV playlist contains blank or duplicate record IDs")
@@ -101,44 +100,48 @@ class XeevClient(private val http: OkHttpClient) {
         val categories = LinkedHashMap<String, Category>()
         val channels = ArrayList<XeevChannel>()
         var ignored = 0
-        content.lineSequence().forEach { raw ->
-            val line = raw.removePrefix("\uFEFF").trimEnd('\r')
-            if (line.isBlank() || !line.startsWith('#')) return@forEach
+        // Read categories first so KeyD is recognised even if a producer places its #CHAN
+        // rows before the corresponding #CAT row in the file.
+        val lines = content.lineSequence().map { it.removePrefix("\uFEFF").trimEnd('\r') }.toList()
+        lines.forEach { line ->
+            if (!line.startsWith("#CAT\t")) return@forEach
             val fields = line.split('\t')
-            when (fields.firstOrNull()?.trim()) {
-                "#CAT" -> {
-                    val id = fields.getOrNull(1)?.trim().orEmpty()
-                    val name = fields.getOrNull(2)?.trim().orEmpty()
-                    if (id.isNotEmpty() && name.isNotEmpty()) categories[id] = Category(id, name)
-                }
-                "#CHAN" -> {
-                    val recordId = fields.getOrNull(1)?.trim().orEmpty()
-                    val name = fields.getOrNull(3)?.trim().orEmpty()
-                    val categoryId = fields.getOrNull(2)?.trim().orEmpty()
-                    // Keep field 7 byte-for-byte as supplied for playback. Trim only for validation.
-                    val playback = fields.getOrNull(7).orEmpty()
-                    val validUrl = playback.trim().toHttpUrlOrNull()?.let {
-                        it.scheme == "http" || it.scheme == "https"
-                    } == true
-                    if (fields.size < 8 || recordId.isEmpty() || name.isEmpty() || categoryId.isEmpty() || !validUrl) {
-                        ignored++
-                    } else {
-                        val primaryEpg = fields.getOrNull(4)?.trim().orEmpty()
-                        val secondaryEpg = fields.getOrNull(5)?.trim().orEmpty()
-                        channels += XeevChannel(
-                            recordId = recordId,
-                            categoryId = categoryId,
-                            name = name.removeSuffix(" -").trim(),
-                            epgId = primaryEpg.takeIf { it.isNotBlank() && it != "0" }
-                                ?: secondaryEpg.takeIf { it.isNotBlank() && it != "0" },
-                            logoUrl = fields.getOrNull(6)?.trim()?.takeIf { url ->
-                                url.toHttpUrlOrNull()?.let { it.scheme == "http" || it.scheme == "https" } == true
-                            },
-                            playbackUrl = playback,
-                            providerStreamId = fields.getOrNull(10)?.trim()?.takeIf { it.isNotBlank() }
-                        )
-                    }
-                }
+            val id = fields.getOrNull(1)?.trim().orEmpty()
+            val name = fields.getOrNull(2)?.trim().orEmpty()
+            if (id.isNotEmpty() && name.isNotEmpty()) categories[id] = Category(id, name)
+        }
+        lines.forEach { line ->
+            if (line.isBlank() || !line.startsWith("#CHAN\t")) return@forEach
+            val fields = line.split('\t')
+            val recordId = fields.getOrNull(1)?.trim().orEmpty()
+            val name = fields.getOrNull(3)?.trim().orEmpty()
+            val categoryId = fields.getOrNull(2)?.trim().orEmpty()
+            // Keep field 7 byte-for-byte as supplied for playback. KeyD is a special
+            // configuration folder: blank stream URLs are meaningful (service not set up),
+            // and its non-blank values are parsed separately from playable catalogue rows.
+            val playback = fields.getOrNull(7).orEmpty()
+            val isKeyD = categories[categoryId]?.name == "KeyD"
+            val validUrl = playback.trim().toHttpUrlOrNull()?.let {
+                it.scheme == "http" || it.scheme == "https"
+            } == true
+            val validPlayback = validUrl || (isKeyD && playback.isBlank())
+            if (fields.size < 8 || recordId.isEmpty() || name.isEmpty() || categoryId.isEmpty() || !validPlayback) {
+                ignored++
+            } else {
+                val primaryEpg = fields.getOrNull(4)?.trim().orEmpty()
+                val secondaryEpg = fields.getOrNull(5)?.trim().orEmpty()
+                channels += XeevChannel(
+                    recordId = recordId,
+                    categoryId = categoryId,
+                    name = name.removeSuffix(" -").trim(),
+                    epgId = primaryEpg.takeIf { it.isNotBlank() && it != "0" }
+                        ?: secondaryEpg.takeIf { it.isNotBlank() && it != "0" },
+                    logoUrl = fields.getOrNull(6)?.trim()?.takeIf { url ->
+                        url.toHttpUrlOrNull()?.let { it.scheme == "http" || it.scheme == "https" } == true
+                    },
+                    playbackUrl = playback,
+                    providerStreamId = fields.getOrNull(10)?.trim()?.takeIf { it.isNotBlank() }
+                )
             }
         }
         if (channels.isEmpty()) throw IOException("XEEV playlist contained no supported #CHAN records")

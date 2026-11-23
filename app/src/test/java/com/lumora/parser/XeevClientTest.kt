@@ -71,4 +71,31 @@ class XeevClientTest {
         assertTrue(runCatching { duplicate.classifyByVodRecordIds(setOf("duplicate")) }.isFailure)
     }
 
+    @Test fun keepsKeyDConfigurationRowsIncludingBlankStreamUrls() {
+        val text = listOf(
+            listOf("#CHAN", "key-t", "keyd-cat", "T", "0", "", "", "http://keyd.xyz/torbox-token").joinToString("\t"),
+            listOf("#CHAN", "key-rd", "keyd-cat", "RD", "0", "", "", "").joinToString("\t"),
+            "#CAT\tkeyd-cat\tKeyD",
+            listOf("#CHAN", "live-1", "live-cat", "BBC One", "0", "BBC1", "", "https://stream.example/live").joinToString("\t"),
+            "#CAT\tlive-cat\tUK | TV"
+        ).joinToString("\n")
+
+        val parsed = client.parsePlaylist(text)
+        val keyd = parsed.channels.filter { parsed.categories.first { c -> c.id == it.categoryId }.name == "KeyD" }
+
+        assertEquals(2, keyd.size)
+        assertEquals("http://keyd.xyz/torbox-token", keyd.first { it.name == "T" }.playbackUrl)
+        assertEquals("", keyd.first { it.name == "RD" }.playbackUrl)
+        assertEquals(listOf("live-1"), parsed.channels.filterNot { it.categoryId == "keyd-cat" }.map { it.recordId })
+    }
+
+    @Test fun blankNonKeyDStreamUrlsAreStillRejected() {
+        val text = listOf(
+            "#CAT\tcat-1\tMovies",
+            listOf("#CHAN", "bad", "cat-1", "No URL", "0", "", "", "").joinToString("\t")
+        ).joinToString("\n")
+        val failure = runCatching { client.parsePlaylist(text) }.exceptionOrNull()
+        assertTrue(failure?.message?.contains("no supported #CHAN records") == true)
+    }
+
 }
