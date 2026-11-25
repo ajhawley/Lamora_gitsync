@@ -279,7 +279,7 @@ class EpgSyncWorker(
                 .setConstraints(
                     Constraints.Builder()
                         .setRequiredNetworkType(NetworkType.CONNECTED)
-                        .setRequiresBatteryNotLow(true)
+                        // First XEEV import and explicit Refresh now should not wait for charging.
                         .setRequiresStorageNotLow(true)
                         .build()
                 )

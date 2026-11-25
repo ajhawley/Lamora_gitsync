@@ -2365,7 +2365,13 @@ internal fun MainActivity.showEpgSourceListDialog() {
             showAddEpgSourceDialog()
             return@launch
         }
-        val names = sources.map { "${it.name} (${it.url.take(40)}...)" }.toTypedArray()
+        val names = sources.map { source ->
+            if (source.id.startsWith("xeev-epg:") || source.name.equals("XEEV EPG", ignoreCase = true)) {
+                source.name
+            } else {
+                "${source.name} (${source.url.take(40)}...)"
+            }
+        }.toTypedArray()
         val dialog = LumoraDialog.Builder(this@showEpgSourceListDialog)
             .setTitle(getString(R.string.epg_sources))
             .setItems(names) { _, which ->

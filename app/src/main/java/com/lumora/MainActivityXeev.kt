@@ -153,25 +153,39 @@ private suspend fun MainActivity.ensureXeevEpgSource(config: IptvProviderConfig)
     if (!providerAllowsLive(config) || !XeevClient.isValidPlaylistId(playlistId)) return
     val sourceId = "xeev-epg:${config.id}"
     val epgUrl = "https://xtream-editor.com/load/epg/$playlistId"
+    val displayName = "${config.name} EPG"
     val shouldStartSync = withContext(Dispatchers.IO) {
         val dao = database.epgSourceDao()
         val sources = dao.getAll()
         val ownedSource = sources.firstOrNull { it.id == sourceId }
         val existing = ownedSource ?: sources.firstOrNull { it.url == epgUrl }
         if (existing == null) {
-            dao.insert(EpgSourceEntity(id = sourceId, name = "${config.name} EPG", url = epgUrl))
+            dao.insert(EpgSourceEntity(id = sourceId, name = displayName, url = epgUrl))
             true
-        } else if (ownedSource != null &&
-            (existing.url != epgUrl || existing.name != "${config.name} EPG")
-        ) {
-            dao.insert(existing.copy(name = "${config.name} EPG", url = epgUrl))
-            existing.url != epgUrl
         } else {
-            false
+            val urlChanged = existing.url != epgUrl
+            val firstImportPending = existing.lastSuccessAt == null
+            val needsRepair = urlChanged || existing.name != displayName ||
+                (firstImportPending && existing.consecutiveFailures > 0)
+            if (needsRepair) {
+                dao.insert(
+                    existing.copy(
+                        name = displayName,
+                        url = epgUrl,
+                        lastRefreshedAt = if (urlChanged || firstImportPending) null else existing.lastRefreshedAt,
+                        lastSuccessAt = if (urlChanged) null else existing.lastSuccessAt,
+                        consecutiveFailures = if (urlChanged || firstImportPending) 0 else existing.consecutiveFailures
+                    )
+                )
+            }
+            // Respect a source the user deliberately disabled. Otherwise, a source that
+            // has never succeeded (or whose playlist ID changed) must get an initial sync.
+            existing.enabled && (urlChanged || firstImportPending)
         }
     }
-    // Don't re-download the full guide on every catalogue refresh. WorkManager retries if
-    // this first run races the catalogue import and there are not yet channels to match.
+    // This may enqueue before catalogue persistence; the worker retries if the catalogue
+    // is not ready. The one-time job is not battery-gated, so low battery won't block the
+    // first guide import until the device is charged.
     if (shouldStartSync) EpgSyncWorker.enqueue(this)
 }
 
